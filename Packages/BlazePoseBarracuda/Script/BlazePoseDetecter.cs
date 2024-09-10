@@ -1,10 +1,11 @@
 using UnityEngine;
-using UnityEngine.Rendering;
 using Mediapipe.PoseDetection;
 using Mediapipe.PoseLandmark;
+using UnityEngine.Rendering;
 
-namespace Mediapipe.BlazePose{
-    public class BlazePoseDetecter: System.IDisposable
+namespace Mediapipe.BlazePose
+{
+    public class BlazePoseDetecter : System.IDisposable
     {
         #region public variables
         /*
@@ -20,9 +21,9 @@ namespace Mediapipe.BlazePose{
             z: Landmark depth with the depth at the midpoint of hips being the origin.
                The smaller the value the closer the landmark is to the camera. ([0, 1]).
                This value is full body mode only.
-               **The use of this value is not recommended beacuse in development.**
+               **The use of this value is not recommended because it's in development.**
             w: The score of whether the landmark position is visible ([0, 1]).
-        
+
         33 index data is the score whether human pose is visible ([0, 1]).
         This data is (score, 0, 0, 0).
         */
@@ -42,6 +43,7 @@ namespace Mediapipe.BlazePose{
         public ComputeBuffer worldLandmarkBuffer;
         // Count of pose landmark vertices.
         public int vertexCount => landmarker.vertexCount;
+
         #endregion
 
         #region constant number
@@ -64,7 +66,8 @@ namespace Mediapipe.BlazePose{
         #endregion
 
         #region public method
-        public BlazePoseDetecter(BlazePoseModel blazePoseModel = BlazePoseModel.full){
+        public BlazePoseDetecter(BlazePoseModel blazePoseModel = BlazePoseModel.full)
+        {
             var resource = Resources.Load<BlazePoseResource>("BlazePose");
 
             cs = resource.cs;
@@ -75,7 +78,7 @@ namespace Mediapipe.BlazePose{
             poseRegionBuffer = new ComputeBuffer(1, sizeof(float) * 24);
             cropedTextureBuffer = new ComputeBuffer(LANDMARK_INPUT_IMAGE_SIZE * LANDMARK_INPUT_IMAGE_SIZE * 3, sizeof(float));
 
-            rvfWindowCount =  0;
+            rvfWindowCount = 0;
             rvfWindowBuffer = new ComputeBuffer(rvfWindowMaxCount * landmarker.vertexCount * 4, sizeof(float));
             rvfWindowWorldBuffer = new ComputeBuffer(rvfWindowMaxCount * landmarker.vertexCount * 4, sizeof(float));
 
@@ -92,9 +95,9 @@ namespace Mediapipe.BlazePose{
         // Process pipeline is refered https://google.github.io/mediapipe/solutions/pose#ml-pipeline.
         // Check above URL or BlazePose paper(https://arxiv.org/abs/2006.10204) for details.
         public void ProcessImage(
-            Texture inputTexture, 
-            BlazePoseModel blazePoseModel = BlazePoseModel.full, 
-            float poseThreshold = 0.75f, 
+            Texture inputTexture,
+            BlazePoseModel blazePoseModel = BlazePoseModel.full,
+            float poseThreshold = 0.75f,
             float iouThreshold = 0.3f)
         {
             // Letterboxing scale factor
@@ -133,7 +136,7 @@ namespace Mediapipe.BlazePose{
             // Predict pose landmark.
             landmarker.ProcessImage(cropedTextureBuffer, (PoseLandmarkModel)blazePoseModel);
 
-            // Map to cordinates of `inputTexture` from pose landmarks on croped letter-box image.
+            // Map to coordinates of `inputTexture` from pose landmarks on cropped letter-box image.
             cs.SetInt("_isWorldProcess", 0);
             cs.SetInt("_keypointCount", landmarker.vertexCount);
             cs.SetFloat("_postDeltatime", deltaTime);
@@ -145,32 +148,29 @@ namespace Mediapipe.BlazePose{
             cs.SetBuffer(3, "_postOutput", outputBuffer);
             cs.Dispatch(3, 1, 1, 1);
 
-            // Map to cordinates of `inputTexture` from pose landmarks on croped letter-box image for 3D world landmarks.
+            // Map to coordinates of `inputTexture` from pose landmarks on cropped letter-box image for 3D world landmarks.
             cs.SetInt("_isWorldProcess", 1);
             cs.SetInt("_keypointCount", landmarker.vertexCount);
             cs.SetFloat("_postDeltatime", deltaTime);
             cs.SetInt("_rvfWindowCount", rvfWindowCount);
-            cs.SetBuffer(3, "_postInput", landmarker.worldLandmarkBuffer);
+            cs.SetBuffer(3, "_postInput", landmarker.outputBuffer);
             cs.SetBuffer(3, "_postRegion", poseRegionBuffer);
             cs.SetBuffer(3, "_postRvfWindowBuffer", rvfWindowWorldBuffer);
-            cs.SetBuffer(3, "_postLastValueScale", lastValueScaleWorld);
+            cs.SetBuffer(3, "_postLastValueScaleWorld", lastValueScaleWorld);
             cs.SetBuffer(3, "_postOutput", worldLandmarkBuffer);
             cs.Dispatch(3, 1, 1, 1);
 
-            rvfWindowCount = Mathf.Min(rvfWindowCount + 1, rvfWindowMaxCount);
+            // Copy results.
+            outputBuffer.GetData(poseLandmarks);
+            worldLandmarkBuffer.GetData(poseWorldLandmarks);
 
-            // Cache landmarks to array for accessing data with CPU (C#).  
-            AsyncGPUReadback.Request(outputBuffer, request => {
-                request.GetData<Vector4>().CopyTo(poseLandmarks);
-            });
-            AsyncGPUReadback.Request(worldLandmarkBuffer, request => {
-                request.GetData<Vector4>().CopyTo(poseWorldLandmarks);
-            });
+            // Manage rvfWindowCount for multiple frames.
+            rvfWindowCount = Mathf.Min(rvfWindowCount + 1, rvfWindowMaxCount);
         }
 
-        public void Dispose(){
-            detecter.Dispose();
-            landmarker.Dispose();
+        // Dispose method to release unmanaged resources
+        public void Dispose()
+        {
             letterboxTextureBuffer.Dispose();
             poseRegionBuffer.Dispose();
             cropedTextureBuffer.Dispose();
@@ -182,9 +182,36 @@ namespace Mediapipe.BlazePose{
             worldLandmarkBuffer.Dispose();
         }
 
+        // New method to get the PoseDetection score from PoseDetecter
+        public float GetPoseDetectionScore()
+        {
+            // Assuming that the PoseDetecter has a method or mechanism to get the PoseDetection
+            if (detecter != null && detecter.outputBuffer != null)
+            {
+                // Reading the PoseDetection score from the output buffer.
+                // You may need to adjust this based on how you access PoseDetection in your setup.
+                Vector4[] detectionData = new Vector4[1];
+                AsyncGPUReadback.Request(detecter.outputBuffer, request => {
+                    if (request.hasError)
+                    {
+                        Debug.LogError("Error accessing detection data.");
+                    }
+                    else
+                    {
+                        detectionData = request.GetData<Vector4>().ToArray();
+                        // Assuming the score is the x-component of the first Vector4
+                        float score = detectionData[0].x;
+                        Debug.Log($"Pose Detection Score: {score}");
+                    }
+                });
+                return detectionData[0].x;
+            }
+            return 0f;
+        }
+
         // Provide cached landmarks.
         public Vector4 GetPoseLandmark(int index) => poseLandmarks[index];
         public Vector4 GetPoseWorldLandmark(int index) => poseWorldLandmarks[index];
-        #endregion
     }
+    #endregion
 }
