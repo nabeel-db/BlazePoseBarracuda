@@ -138,7 +138,7 @@ namespace Mediapipe.BlazePose
             // Predict pose landmark.
             landmarker.ProcessImage(cropedTextureBuffer, (PoseLandmarkModel)blazePoseModel);
 
-            // Map to coordinates of `inputTexture` from pose landmarks on cropped letter-box image.
+            // Map to cordinates of `inputTexture` from pose landmarks on croped letter-box image.
             cs.SetInt("_isWorldProcess", 0);
             cs.SetInt("_keypointCount", landmarker.vertexCount);
             cs.SetFloat("_postDeltatime", deltaTime);
@@ -150,7 +150,7 @@ namespace Mediapipe.BlazePose
             cs.SetBuffer(3, "_postOutput", outputBuffer);
             cs.Dispatch(3, 1, 1, 1);
 
-            // Map to coordinates of `inputTexture` from pose landmarks on cropped letter-box image for 3D world landmarks.
+            // Map to cordinates of `inputTexture` from pose landmarks on croped letter-box image for 3D world landmarks.
             cs.SetInt("_isWorldProcess", 1);
             cs.SetInt("_keypointCount", landmarker.vertexCount);
             cs.SetFloat("_postDeltatime", deltaTime);
@@ -158,19 +158,34 @@ namespace Mediapipe.BlazePose
             cs.SetBuffer(3, "_postInput", landmarker.worldLandmarkBuffer);
             cs.SetBuffer(3, "_postRegion", poseRegionBuffer);
             cs.SetBuffer(3, "_postRvfWindowBuffer", rvfWindowWorldBuffer);
-            cs.SetBuffer(3, "_postLastValueScaleWorld", lastValueScaleWorld);
+            cs.SetBuffer(3, "_postLastValueScale", lastValueScaleWorld);
             cs.SetBuffer(3, "_postOutput", worldLandmarkBuffer);
             cs.Dispatch(3, 1, 1, 1);
 
             rvfWindowCount = Mathf.Min(rvfWindowCount + 1, rvfWindowMaxCount);
 
             // Cache landmarks to array for accessing data with CPU (C#).  
-            AsyncGPUReadback.Request(outputBuffer, (request) => {
+            AsyncGPUReadback.Request(outputBuffer, request => {
                 request.GetData<Vector4>().CopyTo(poseLandmarks);
             });
-            AsyncGPUReadback.Request(worldLandmarkBuffer, (request) => {
+            AsyncGPUReadback.Request(worldLandmarkBuffer, request => {
                 request.GetData<Vector4>().CopyTo(poseWorldLandmarks);
             });
+        }
+
+        public void Dispose()
+        {
+            detecter.Dispose();
+            landmarker.Dispose();
+            letterboxTextureBuffer.Dispose();
+            poseRegionBuffer.Dispose();
+            cropedTextureBuffer.Dispose();
+            rvfWindowBuffer.Dispose();
+            rvfWindowWorldBuffer.Dispose();
+            lastValueScale.Dispose();
+            lastValueScaleWorld.Dispose();
+            outputBuffer.Dispose();
+            worldLandmarkBuffer.Dispose();
         }
 
         // Method to read countBuffer asynchronously and update the pose count
@@ -206,20 +221,9 @@ namespace Mediapipe.BlazePose
             return detectedPoseCount;
         }
 
-        public void Dispose()
-        {
-            detecter?.Dispose();
-            landmarker?.Dispose();
-            letterboxTextureBuffer?.Dispose();
-            poseRegionBuffer?.Dispose();
-            cropedTextureBuffer?.Dispose();
-            outputBuffer?.Dispose();
-            worldLandmarkBuffer?.Dispose();
-            rvfWindowBuffer?.Dispose();
-            rvfWindowWorldBuffer?.Dispose();
-            lastValueScale?.Dispose();
-            lastValueScaleWorld?.Dispose();
-        }
+        // Provide cached landmarks.
+        public Vector4 GetPoseLandmark(int index) => poseLandmarks[index];
+        public Vector4 GetPoseWorldLandmark(int index) => poseWorldLandmarks[index];
         #endregion
     }
 }
